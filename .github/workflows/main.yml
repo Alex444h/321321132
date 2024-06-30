@@ -1,0 +1,50 @@
+name: Deploy WireGuard
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Install WireGuard
+      run: sudo apt-get update && sudo apt-get install -y wireguard
+
+    - name: Generate WireGuard keys
+      run: |
+        mkdir -p ~/wireguard-config
+        wg genkey | tee ~/wireguard-config/privatekey | wg pubkey | tee ~/wireguard-config/publickey
+
+    - name: Configure WireGuard
+      run: |
+        PRIVATE_KEY=$(cat ~/wireguard-config/privatekey)
+        PUBLIC_KEY=$(cat ~/wireguard-config/publickey)
+        echo "[Interface]
+        PrivateKey = $PRIVATE_KEY
+        Address = 10.0.0.1/24
+        ListenPort = 51820
+
+        [Peer]
+        PublicKey = <client_public_key>
+        AllowedIPs = 10.0.0.2/32
+        " | sudo tee /etc/wireguard/wg0.conf
+
+    - name: Enable IP forwarding
+      run: sudo sysctl -w net.ipv4.ip_forward=1
+
+    - name: Configure iptables
+      run: |
+        sudo iptables -A FORWARD -i wg0 -j ACCEPT
+        sudo iptables -A FORWARD -o wg0 -j ACCEPT
+        sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+        sudo apt-get install -y iptables-persistent
+        sudo netfilter-persistent save
+
+    - name: Start WireGuard
+      run: sudo wg-quick up wg0
