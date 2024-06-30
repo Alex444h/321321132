@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,57 +16,24 @@ jobs:
     - name: Install WireGuard
       run: sudo apt-get update && sudo apt-get install -y wireguard
 
-    - name: Generate WireGuard keys
+    - name: Generate Server Keys
       run: |
-        mkdir -p ~/wireguard-config
-        wg genkey | tee ~/wireguard-config/server_privatekey | wg pubkey | tee ~/wireguard-config/server_publickey
-        wg genkey | tee ~/wireguard-config/client_privatekey | wg pubkey | tee ~/wireguard-config/client_publickey
+        wg genkey | tee server_private.key | wg pubkey > server_public.key
+        echo "::set-output name=server_private_key::$(cat server_private.key)"
+        echo "::set-output name=server_public_key::$(cat server_public.key)"
 
     - name: Configure WireGuard
       run: |
-        SERVER_PRIVATE_KEY=$(cat ~/wireguard-config/server_privatekey)
-        CLIENT_PUBLIC_KEY=$(cat ~/wireguard-config/client_publickey)
-        echo "[Interface]
-        PrivateKey = $SERVER_PRIVATE_KEY
+        sudo bash -c 'cat << EOF > /etc/wireguard/wg0.conf
+        [Interface]
+        PrivateKey = ${{ steps.generate-keys.outputs.server_private_key }}
         Address = 10.0.0.1/24
         ListenPort = 51820
 
         [Peer]
-        PublicKey = $CLIENT_PUBLIC_KEY
+        PublicKey = <client_public_key>
         AllowedIPs = 10.0.0.2/32
-        " | sudo tee /etc/wireguard/wg0.conf
-
-    - name: Enable IP forwarding
-      run: sudo sysctl -w net.ipv4.ip_forward=1
-
-    - name: Configure iptables
-      run: |
-        sudo iptables -A FORWARD -i wg0 -j ACCEPT
-        sudo iptables -A FORWARD -o wg0 -j ACCEPT
-        sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-        sudo apt-get install -y iptables-persistent
-        sudo netfilter-persistent save
-
+        EOF'
+        
     - name: Start WireGuard
       run: sudo wg-quick up wg0
-
-    - name: Save client configuration
-      run: |
-        CLIENT_PRIVATE_KEY=$(cat ~/wireguard-config/client_privatekey)
-        SERVER_PUBLIC_KEY=$(cat ~/wireguard-config/server_publickey)
-        echo "[Interface]
-        PrivateKey = $CLIENT_PRIVATE_KEY
-        Address = 10.0.0.2/24
-        DNS = 1.1.1.1
-
-        [Peer]
-        PublicKey = $SERVER_PUBLIC_KEY
-        Endpoint = <server_ip>:51820
-        AllowedIPs = 0.0.0.0/0
-        " > ~/wireguard-config/client.conf
-
-    - name: Upload client configuration
-      uses: actions/upload-artifact@v2
-      with:
-        name: client-config
-        path: ~/wireguard-config/client.conf
