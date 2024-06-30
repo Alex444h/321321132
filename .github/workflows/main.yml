@@ -23,6 +23,13 @@ jobs:
         echo "::set-output name=server_private_key::$(cat server_private.key)"
         echo "::set-output name=server_public_key::$(cat server_public.key)"
 
+    - name: Generate Client Keys
+      id: generate-client-keys
+      run: |
+        wg genkey | tee client_private.key | wg pubkey > client_public.key
+        echo "::set-output name=client_private_key::$(cat client_private.key)"
+        echo "::set-output name=client_public_key::$(cat client_public.key)"
+
     - name: Configure WireGuard
       run: |
         echo "[Interface]
@@ -31,7 +38,7 @@ jobs:
         ListenPort = 51820
 
         [Peer]
-        PublicKey = <client_public_key>
+        PublicKey = ${{ steps.generate-client-keys.outputs.client_public_key }}
         AllowedIPs = 10.0.0.2/32
         " | sudo tee /etc/wireguard/wg0.conf
 
@@ -51,8 +58,7 @@ jobs:
 
     - name: Save client configuration
       run: |
-        CLIENT_PRIVATE_KEY=$(wg genkey)
-        CLIENT_PUBLIC_KEY=$(echo $CLIENT_PRIVATE_KEY | wg pubkey)
+        CLIENT_PRIVATE_KEY=${{ steps.generate-client-keys.outputs.client_private_key }}
         SERVER_PUBLIC_KEY=${{ steps.generate-keys.outputs.server_public_key }}
         echo "[Interface]
         PrivateKey = $CLIENT_PRIVATE_KEY
